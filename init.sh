@@ -1,10 +1,37 @@
 #!/bin/bash
 
+### usage
+## NET_NAME=ens160 ./init.sh
+## DATA_DIR=/dev/sdb ./init.sh
+
 ## NET_NAME  更改网卡名
 ## DISK_DEV  格式化磁盘并挂载
 ## DATA_DIR docker数据目录
+
 DOCKERD_PULGIN_DIR=/usr/local/lib/docker/cli-plugins
 images="zk.tar,broker.tar,bookie.tar,etcd.tar,es.tar,backend.tar,traefik.tar"
+
+## check os/arch
+
+check_arch(){
+        arch=$(arch)
+        if [[ $arch =~ "x86_64" ]];then
+                return 0
+        else
+                echo "当前CPU架构$arch,需要x86_64/i386"
+		exit 1
+        fi
+}
+check_os(){
+	os=$(lsb_release -a|grep Des|awk '{print $2}') >/dev/null 2>&1
+	version=$(lsb_release -a|grep Des|awk '{print $3}'|awk -F "." '{print $1}') >/dev/null 2>&1
+        if [ $os == "Ubuntu" -a $version -eq 20 ];then
+                return 0
+        else
+                echo "发行版/版本不匹配"
+		exit 1
+        fi
+}
 
 ## set set_max_map_count=262144
 set_max_map() {
@@ -65,6 +92,8 @@ change_net() {
 }
 
 main() {
+	check_arch
+	check_os
 	dockerd_install
 	set_max_map
 	if [ $DISK_DEV ]; then
