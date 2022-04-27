@@ -2,7 +2,8 @@
 
 ### usage
 ## S_NET_NAME=ens160 T_NET_NAME=eth0 ./init.sh
-## DATA_DIR=/dev/sdb ./init.sh
+## DISK_DEV=/dev/sdb ./init.sh
+## DATA_DIR=/data1 ./init.sh 数据目录默认挂载/data
 
 ## S_NET_NAME  原网卡名
 ## T_NET_NAME  目标网卡名
