@@ -1,53 +1,72 @@
 #!/bin/bash
 
 ### usage
-## NET_NAME=ens160 ./init.sh
+## S_NET_NAME=ens160 T_NET_NAME=eth0 ./init.sh
 ## DATA_DIR=/dev/sdb ./init.sh
 
-## NET_NAME  更改网卡名
+## S_NET_NAME  原网卡名
+## T_NET_NAME  目标网卡名
 ## DISK_DEV  格式化磁盘并挂载
 ## DATA_DIR docker数据目录
 
 DOCKERD_PULGIN_DIR=/usr/local/lib/docker/cli-plugins
 images="zk.tar,broker.tar,bookie.tar,etcd.tar,es.tar,backend.tar,traefik.tar"
 
-## check os/arch
+## check dockerd /docker compose
+check_dockerd() {
+	if ! docker version >/dev/null 2>&1; then
+		return 1
+	else
 
-check_arch(){
-        arch=$(arch)
-        if [[ $arch =~ "x86_64" ]];then
-                return 0
-        else
-                echo "当前CPU架构$arch,需要x86_64/i386"
-		exit 1
-        fi
+		if ! docker compose version >/dev/null 2>&1; then
+			return 1
+		else
+			return 0
+		fi
+	fi
 }
-check_os(){
-	os=$(lsb_release -a|grep Des|awk '{print $2}') >/dev/null 2>&1
-	version=$(lsb_release -a|grep Des|awk '{print $3}'|awk -F "." '{print $1}') >/dev/null 2>&1
-        if [ $os == "Ubuntu" -a $version -eq 20 ];then
-                return 0
-        else
-                echo "发行版/版本不匹配"
+
+## check os/arch
+check_arch() {
+	arch=$(arch)
+	if [[ $arch =~ "x86_64" ]]; then
+		return 0
+	else
+		echo "当前CPU架构$arch,需要x86_64/i386"
 		exit 1
-        fi
+	fi
+}
+check_os() {
+	os=$(lsb_release -a 2>/dev/null | grep Des | awk '{print $2}')
+	version=$(lsb_release -a 2>/dev/null | grep Des | awk '{print $3}' | awk -F "." '{print $1}')
+	if [ "$os" == "Ubuntu" ] && [ "$version" -eq 20 ]; then
+		return 0
+	else
+		echo "发行版/版本不匹配"
+		exit 1
+	fi
 }
 
 ## set set_max_map_count=262144
 set_max_map() {
-	sed '$ a vm.max_map_count=262144' /etc/sysctl.conf -i
-	sysctl -p
+	count="$(grep "vm.max_map_count" /etc/sysctl.conf -c)"
+	if [ "$count" -eq 0 ]; then
+		sed '$ a vm.max_map_count=262144' /etc/sysctl.conf -i
+		sysctl -p
+	else
+		return 0
+	fi
 }
 
 ## 格式化磁盘、挂载、docker目录链接/data/
 format_disk() {
-	if [ ! $DATA_DIR ]; then
+	if [ -z "$DATA_DIR" ]; then
 		DATA_DIR="/data"
 	fi
-	mkfs.ext4 $DATA_DISK
+	mkfs.ext4 "$DISK_DEV"
 	if [ ! -d $DATA_DIR ]; then
 		mkdir $DATA_DIR
-		echo UUID=$(blkid ${DISK_DEV} | awk -F '"' '{print $2}') $DATA_DIR ext4 defaults 0 1 >>/etc/fstab
+		echo UUID="$(blkid "$DISK_DEV" | awk -F '"' '{print $2}')" $DATA_DIR ext4 defaults 0 1 >>/etc/fstab
 		mount -a
 		ln -sv /var/lib/docker $DATA_DIR/docker
 	else
@@ -74,33 +93,44 @@ dockerd_install() {
 load_image() {
 	arr=(${1//,/ })
 	for image in "${arr[@]}"; do
-		docker load -i image
+		docker load -i "$image"
 	done
 
 }
 
 ## 更改网卡名
 change_net() {
-	read -p "更改网卡名会导致重启机器(yes/no)?" tmp
-	if [ $tmp == yes ]; then
-		sed 's#GRUB_CMDLINE_LINUX=""#GRUB_CMDLINE_LINUX="net.ifnames=0"#g' /etc/default/grup
-		sed "s#${NET_NAME}#eth0#g" /etc/netplan/00-installer-config.yaml
-		echo "reboot"
-	else
-		return 1
-	fi
+	change_net() {
+		file=$(ls /etc/netplan/)
+		read -p "更改网卡名可能会导致网络不可用(yes/no)?" tmp
+		if [ "$tmp" == yes ]; then
+			macaddr=$(cat /sys/class/net/"$S_NET_NAME"/address)
+			sed "/${S_NET_NAME}/a\      match:\n        macaddress: $macaddr\n      set-name: ${T_NET_NAME}" /etc/netplan/${file} -i
+			sed "s#${S_NET_NAME}#${T_NET_NAME}#g" /etc/netplan/"$file" -i
+			netplan apply
+		else
+			return 1
+		fi
+	}
+
 }
 
 main() {
 	check_arch
 	check_os
-	dockerd_install
+	check_dockerd
+	if [ $? -eq 1 ]; then
+		dockerd_install
+	fi
 	set_max_map
-	if [ $DISK_DEV ]; then
+	if [ "$DISK_DEV" ]; then
 		format_disk
 	fi
 	load_image $images
-	if [ $NET_NAME ]; then
+	if [[ -z "$S_NET_NAME" || -z "$T_NET_NAME" ]]; then
+		echo "更改网卡名需要两个参数,原名称与目标名称"
+		exit 1
+	else
 		change_net
 	fi
 }
